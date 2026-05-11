@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Client Intake</title>
+<style>
+  :root {
+    --brand: #0f766e;
+    --brand-hover: #115e59;
+    --bg: #f3f4f6;
+    --card: #ffffff;
+    --text: #111827;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --low: #16a34a;
+    --medium: #ca8a04;
+    --high: #dc2626;
+    --pending: #6b7280;
+    --in_progress: #2563eb;
+    --completed: #16a34a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); }
+  header { background: var(--brand); color: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+  header h1 { margin: 0; font-size: 1.25rem; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; }
+  .btn { background: var(--brand); color: white; border: none; padding: 0.6rem 1.2rem; border-radius: 6px; cursor: pointer; font-size: 0.9rem; font-weight: 500; }
+  .btn:hover { background: var(--brand-hover); }
+  .btn.secondary { background: transparent; color: var(--brand); border: 1px solid var(--brand); }
+  .btn.success { background: var(--completed); }
+  .btn.danger { background: var(--high); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  input, textarea, select { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; font-family: inherit; background: white; }
+  textarea { min-height: 80px; resize: vertical; }
+  label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 0.25rem; margin-top: 0.75rem; font-weight: 500; }
+  .row { display: flex; gap: 1rem; }
+  .row > * { flex: 1; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem; }
+  .stat { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; }
+  .stat .num { font-size: 1.6rem; font-weight: 700; }
+  .stat .label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 0.75rem; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+  th { font-weight: 600; color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  tr.clickable { cursor: pointer; }
+  tr.clickable:hover { background: #f9fafb; }
+  .badge { display: inline-block; padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 500; color: white; }
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 100; }
+  .modal { background: white; border-radius: 8px; padding: 2rem; max-width: 640px; width: 90%; max-height: 90vh; overflow-y: auto; }
+  .error { background: #fee2e2; border: 1px solid #fecaca; color: #991b1b; padding: 0.75rem; border-radius: 6px; margin: 1rem 0; font-size: 0.9rem; }
+  .muted { color: var(--muted); }
+  .flex-between { display: flex; justify-content: space-between; align-items: center; }
+  .pager { display: flex; gap: 0.5rem; align-items: center; margin-top: 1rem; }
+  .pager .muted { margin-left: auto; }
+  .empty { text-align: center; padding: 3rem; color: var(--muted); }
+  .task-row { display: flex; gap: 0.75rem; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid var(--border); }
+  .task-row:last-child { border-bottom: none; }
+  .task-row .title { flex: 1; }
+  .task-row .due { font-size: 0.85rem; color: var(--muted); }
+  .task-row.completed .title { text-decoration: line-through; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Client Intake</h1>
+  <button class="btn secondary" onclick="reconfigure()" style="background:transparent;color:white;border-color:white;">Configure</button>
+</header>
+<div class="container" id="app"></div>
+
+<script>
+const LS = { cfg: 'clientintake:config' };
+const DEFAULT_CFG = { baseUrl: '', canonical: 'client-intake' };
+
+function getCfg() { const r = localStorage.getItem(LS.cfg); return r ? JSON.parse(r) : null; }
+function saveCfg(c) { localStorage.setItem(LS.cfg, JSON.stringify(c)); }
+function normalizeBase(url) { return url.trim().replace(/\/+$/, ''); }
+
+async function api(path, opts = {}) {
+  const cfg = getCfg();
+  if (!cfg) throw new Error('Not configured');
+  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+  const res = await fetch(`${cfg.baseUrl}/api:${cfg.canonical}${path}`, { ...opts, headers });
+  const text = await res.text();
+  let data; try { data = JSON.parse(text); } catch { data = text; }
+  if (!res.ok) throw new Error((data && (data.message || data.error)) || `HTTP ${res.status}`);
+  return data;
+}
+
+const state = {
+  view: 'list',
+  page: 1,
+  perPage: 20,
+  sortBy: 'created_at',
+  sortOrder: 'desc',
+  clients: [],
+  total: 0,
+  selected: null,
+  selectedTasks: [],
+  error: null,
+};
+
+const $ = (sel) => document.querySelector(sel);
+const app = () => $('#app');
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtDate = (s) => s ? new Date(s).toLocaleDateString() : '';
+const fmtDateTime = (s) => s ? new Date(s).toLocaleString() : '';
+
+function riskBadge(level) {
+  const color = { low: 'var(--low)', medium: 'var(--medium)', high: 'var(--high)' }[level] || 'var(--muted)';
+  return `<span class="badge" style="background:${color}">${esc(level)}</span>`;
+}
+
+function statusBadge(status) {
+  const color = { pending: 'var(--pending)', in_progress: 'var(--in_progress)', completed: 'var(--completed)' }[status] || 'var(--muted)';
+  return `<span class="badge" style="background:${color}">${esc(status)}</span>`;
+}
+
+function showError(msg) { state.error = msg; render(); }
+function clearError() { state.error = null; }
+
+function configView() {
+  const cfg = getCfg() || DEFAULT_CFG;
+  app().innerHTML = `
+    <div class="card" style="max-width:560px;margin:2rem auto;">
+      <h2 style="margin-top:0;">Configure</h2>
+      <p class="muted">Point this frontend at your Xano instance. The base URL is the workspace URL without a trailing path.</p>
+      <label>Xano base URL</label>
+      <input id="cfg-base" placeholder="https://xxxx-xxxx-xxxx.n7d.xano.io" value="${esc(cfg.baseUrl)}">
+      <label>API group canonical</label>
+      <input id="cfg-canonical" value="${esc(cfg.canonical)}">
+      <p class="muted" style="font-size:0.8rem;">This template ships with canonical <code>client-intake</code>. Change only if you renamed the api_group.</p>
+      <div style="margin-top:1rem;display:flex;gap:0.5rem;">
+        <button class="btn" onclick="saveConfig()">Save</button>
+      </div>
+    </div>
+  `;
+}
+
+function saveConfig() {
+  const baseUrl = normalizeBase($('#cfg-base').value);
+  const canonical = $('#cfg-canonical').value.trim() || 'client-intake';
+  if (!baseUrl) { alert('Base URL is required'); return; }
+  saveCfg({ baseUrl, canonical });
+  state.view = 'list';
+  loadList();
+}
+
+function reconfigure() { state.view = 'config'; render(); }
+
+async function loadList() {
+  clearError();
+  state.view = 'list';
+  try {
+    const params = new URLSearchParams({
+      page: state.page, per_page: state.perPage,
+      sort_by: state.sortBy, sort_order: state.sortOrder,
+    });
+    const res = await api(`/list?${params}`);
+    state.clients = (res.data && res.data.items) || [];
+    state.total = (res.data && res.data.itemsTotal) || res.total || 0;
+    render();
+  } catch (e) { showError(e.message); }
+}
+
+async function loadDetail(id) {
+  clearError();
+  try {
+    const [c, t] = await Promise.all([
+      api(`/by-id/${id}`),
+      api(`/by-id/${id}/tasks`),
+    ]);
+    state.selected = c.client;
+    state.selectedTasks = (t.tasks && t.tasks.items) || t.tasks || [];
+    state.view = 'detail';
+    render();
+  } catch (e) { showError(e.message); }
+}
+
+function listView() {
+  const stats = {
+    total: state.total,
+    low: state.clients.filter(c => c.risk_tolerance === 'low').length,
+    medium: state.clients.filter(c => c.risk_tolerance === 'medium').length,
+    high: state.clients.filter(c => c.risk_tolerance === 'high').length,
+  };
+  const totalPages = Math.max(1, Math.ceil(state.total / state.perPage));
+  app().innerHTML = `
+    ${state.error ? `<div class="error">${esc(state.error)}</div>` : ''}
+    <div class="stats">
+      <div class="stat"><div class="num">${stats.total}</div><div class="label">Total clients</div></div>
+      <div class="stat"><div class="num">${stats.low}</div><div class="label">Low risk (page)</div></div>
+      <div class="stat"><div class="num">${stats.medium}</div><div class="label">Medium risk (page)</div></div>
+      <div class="stat"><div class="num">${stats.high}</div><div class="label">High risk (page)</div></div>
+    </div>
+
+    <div class="card">
+      <div class="flex-between" style="margin-bottom:1rem;">
+        <h2 style="margin:0;">Clients</h2>
+        <div style="display:flex;gap:0.5rem;align-items:center;">
+          <select onchange="state.sortBy=this.value;state.page=1;loadList()" style="width:auto;">
+            ${['created_at','name','email','risk_tolerance'].map(f => `<option value="${f}" ${state.sortBy===f?'selected':''}>Sort: ${f}</option>`).join('')}
+          </select>
+          <select onchange="state.sortOrder=this.value;state.page=1;loadList()" style="width:auto;">
+            <option value="desc" ${state.sortOrder==='desc'?'selected':''}>desc</option>
+            <option value="asc" ${state.sortOrder==='asc'?'selected':''}>asc</option>
+          </select>
+          <button class="btn" onclick="openCreateModal()">+ New client</button>
+        </div>
+      </div>
+
+      ${state.clients.length === 0 ? `
+        <div class="empty">
+          <p>No clients yet.</p>
+          <button class="btn" onclick="openCreateModal()">Add your first client</button>
+        </div>
+      ` : `
+        <table>
+          <thead>
+            <tr><th>Name</th><th>Email</th><th>Risk</th><th>Objective</th><th>Created</th></tr>
+          </thead>
+          <tbody>
+            ${state.clients.map(c => `
+              <tr class="clickable" onclick="loadDetail(${c.id})">
+                <td><strong>${esc(c.name)}</strong></td>
+                <td>${esc(c.email)}</td>
+                <td>${riskBadge(c.risk_tolerance)}</td>
+                <td>${esc((c.investment_objective || '').slice(0, 40))}${(c.investment_objective || '').length > 40 ? '…' : ''}</td>
+                <td class="muted">${fmtDate(c.created_at)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        <div class="pager">
+          <button class="btn secondary" ${state.page<=1?'disabled':''} onclick="state.page--;loadList()">‹ Prev</button>
+          <button class="btn secondary" ${state.page>=totalPages?'disabled':''} onclick="state.page++;loadList()">Next ›</button>
+          <span class="muted">Page ${state.page} of ${totalPages} · ${state.total} total</span>
+        </div>
+      `}
+    </div>
+  `;
+}
+
+function detailView() {
+  const c = state.selected;
+  if (!c) return;
+  app().innerHTML = `
+    ${state.error ? `<div class="error">${esc(state.error)}</div>` : ''}
+    <div style="margin-bottom:1rem;">
+      <button class="btn secondary" onclick="loadList()">← Back to clients</button>
+    </div>
+
+    <div class="card">
+      <div class="flex-between">
+        <div>
+          <h2 style="margin:0 0 0.25rem 0;">${esc(c.name)}</h2>
+          <div class="muted">${esc(c.email)}${c.phone ? ' · ' + esc(c.phone) : ''}</div>
+        </div>
+        <div>${riskBadge(c.risk_tolerance)}</div>
+      </div>
+      <div style="margin-top:1rem;">
+        <label>Investment objective</label>
+        <div>${esc(c.investment_objective)}</div>
+      </div>
+      ${c.advisor_notes ? `
+        <div style="margin-top:1rem;">
+          <label>Advisor notes</label>
+          <div style="white-space:pre-wrap;">${esc(c.advisor_notes)}</div>
+        </div>
+      ` : ''}
+      <div style="margin-top:1.5rem;display:flex;gap:0.5rem;">
+        <button class="btn" onclick="openEditModal()">Edit</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="flex-between" style="margin-bottom:1rem;">
+        <h3 style="margin:0;">Follow-up tasks</h3>
+        <button class="btn" onclick="openTaskModal()">+ New task</button>
+      </div>
+      ${state.selectedTasks.length === 0 ? `
+        <div class="empty"><p>No tasks yet.</p></div>
+      ` : state.selectedTasks.map(t => `
+        <div class="task-row ${t.status === 'completed' ? 'completed' : ''}">
+          <div>${statusBadge(t.status)}</div>
+          <div class="title">
+            <div><strong>${esc(t.title)}</strong></div>
+            <div class="due">Due ${fmtDate(t.due_date)}${t.notes ? ' · ' + esc(t.notes) : ''}</div>
+          </div>
+          ${t.status !== 'completed' ? `<button class="btn success" onclick="completeTask(${t.id})">Complete</button>` : ''}
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function openCreateModal() {
+  document.body.insertAdjacentHTML('beforeend', modalHtml({
+    title: 'New client',
+    fields: clientFormFields({}),
+    submit: 'Create',
+    onSubmit: 'submitCreate()',
+  }));
+}
+
+function openEditModal() {
+  document.body.insertAdjacentHTML('beforeend', modalHtml({
+    title: 'Edit client',
+    fields: clientFormFields(state.selected),
+    submit: 'Save',
+    onSubmit: 'submitEdit()',
+  }));
+}
+
+function openTaskModal() {
+  const today = new Date(); today.setDate(today.getDate() + 7);
+  const due = today.toISOString().slice(0, 10);
+  document.body.insertAdjacentHTML('beforeend', modalHtml({
+    title: 'New follow-up task',
+    fields: `
+      <label>Title</label><input id="f-title">
+      <label>Due date</label><input id="f-due" type="date" value="${due}">
+      <label>Status</label>
+      <select id="f-status">
+        <option value="pending">pending</option>
+        <option value="in_progress">in_progress</option>
+        <option value="completed">completed</option>
+      </select>
+      <label>Notes</label><textarea id="f-notes"></textarea>
+    `,
+    submit: 'Create task',
+    onSubmit: 'submitTask()',
+  }));
+}
+
+function modalHtml({ title, fields, submit, onSubmit }) {
+  return `
+    <div class="modal-backdrop" id="modal-bd">
+      <div class="modal">
+        <div class="flex-between"><h2 style="margin:0;">${title}</h2><button class="btn secondary" onclick="closeModal()">Cancel</button></div>
+        <div id="modal-err"></div>
+        ${fields}
+        <div style="margin-top:1.5rem;text-align:right;">
+          <button class="btn" onclick="${onSubmit}">${submit}</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function clientFormFields(c) {
+  c = c || {};
+  return `
+    <label>Name</label><input id="f-name" value="${esc(c.name || '')}">
+    <label>Email</label><input id="f-email" type="email" value="${esc(c.email || '')}">
+    <label>Phone</label><input id="f-phone" value="${esc(c.phone || '')}">
+    <label>Risk tolerance</label>
+    <select id="f-risk">
+      ${['low','medium','high'].map(r => `<option value="${r}" ${c.risk_tolerance===r?'selected':''}>${r}</option>`).join('')}
+    </select>
+    <label>Investment objective</label><textarea id="f-objective">${esc(c.investment_objective || '')}</textarea>
+    <label>Advisor notes (optional)</label><textarea id="f-notes">${esc(c.advisor_notes || '')}</textarea>
+  `;
+}
+
+function closeModal() { const m = $('#modal-bd'); if (m) m.remove(); }
+function modalErr(msg) { const el = $('#modal-err'); if (el) el.innerHTML = `<div class="error">${esc(msg)}</div>`; }
+
+async function submitCreate() {
+  try {
+    await api('/create', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: $('#f-name').value,
+        email: $('#f-email').value,
+        phone: $('#f-phone').value || undefined,
+        risk_tolerance: $('#f-risk').value,
+        investment_objective: $('#f-objective').value,
+        advisor_notes: $('#f-notes').value || undefined,
+      }),
+    });
+    closeModal();
+    loadList();
+  } catch (e) { modalErr(e.message); }
+}
+
+async function submitEdit() {
+  try {
+    const res = await api(`/by-id/${state.selected.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        name: $('#f-name').value,
+        email: $('#f-email').value,
+        phone: $('#f-phone').value || undefined,
+        risk_tolerance: $('#f-risk').value,
+        investment_objective: $('#f-objective').value,
+        advisor_notes: $('#f-notes').value || undefined,
+      }),
+    });
+    state.selected = res.client;
+    closeModal();
+    render();
+  } catch (e) { modalErr(e.message); }
+}
+
+async function submitTask() {
+  try {
+    await api(`/by-id/${state.selected.id}/tasks`, {
+      method: 'POST',
+      body: JSON.stringify({
+        title: $('#f-title').value,
+        due_date: $('#f-due').value,
+        status: $('#f-status').value,
+        notes: $('#f-notes').value || undefined,
+      }),
+    });
+    closeModal();
+    loadDetail(state.selected.id);
+  } catch (e) { modalErr(e.message); }
+}
+
+async function completeTask(taskId) {
+  try {
+    await api(`/tasks/${taskId}/complete`, { method: 'PATCH' });
+    loadDetail(state.selected.id);
+  } catch (e) { showError(e.message); }
+}
+
+function render() {
+  if (state.view === 'config') return configView();
+  if (state.view === 'detail') return detailView();
+  return listView();
+}
+
+if (!getCfg()) {
+  state.view = 'config';
+  render();
+} else {
+  loadList();
+}
+</script>
+</body>
+</html>
