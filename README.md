@@ -23,10 +23,10 @@ frontend/
 
 ```bash
 npm install -g @xano/cli
-xano profile:wizard
+xano auth
 
 cd backend
-xano workspace:push
+xano workspace push
 ```
 
 This creates 2 tables (`clients`, `client_tasks`) and one API group (`Clients`, canonical `client-intake`) in your workspace.
