@@ -97,7 +97,7 @@ query "list" verb=GET {
     success: true,
     page: $input.page,
     per_page: $input.per_page,
-    total: $clients.total,
+    total: $clients.itemsTotal,
     data: $clients
   }
 }

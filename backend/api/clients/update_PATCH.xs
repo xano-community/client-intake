@@ -64,17 +64,47 @@ query "by-id/{id}" verb=PATCH {
       }
     }
 
-    db.edit "clients" {
+    // Build a partial update of only the provided fields. (Avoid `||` here:
+    // XanoScript `||` is logical-OR and yields a boolean, not a coalesce.)
+    var $updates {
+      value = {updated_at: now}
+    }
+
+    conditional {
+      if ($input.name != null) {
+        var.update $updates {value = $updates|set:"name":$input.name}
+      }
+    }
+    conditional {
+      if ($input.email != null) {
+        var.update $updates {value = $updates|set:"email":$input.email}
+      }
+    }
+    conditional {
+      if ($input.phone != null) {
+        var.update $updates {value = $updates|set:"phone":$input.phone}
+      }
+    }
+    conditional {
+      if ($input.risk_tolerance != null) {
+        var.update $updates {value = $updates|set:"risk_tolerance":$input.risk_tolerance}
+      }
+    }
+    conditional {
+      if ($input.investment_objective != null) {
+        var.update $updates {value = $updates|set:"investment_objective":$input.investment_objective}
+      }
+    }
+    conditional {
+      if ($input.advisor_notes != null) {
+        var.update $updates {value = $updates|set:"advisor_notes":$input.advisor_notes}
+      }
+    }
+
+    db.patch "clients" {
       field_name = "id"
       field_value = $input.id
-      data = {
-        name: $input.name || $client.name,
-        email: $input.email || $client.email,
-        phone: $input.phone || $client.phone,
-        risk_tolerance: $input.risk_tolerance || $client.risk_tolerance,
-        investment_objective: $input.investment_objective || $client.investment_objective,
-        advisor_notes: $input.advisor_notes || $client.advisor_notes
-      }
+      data = $updates
     } as $updated_client
   }
   response = {
